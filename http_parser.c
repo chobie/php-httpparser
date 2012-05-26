@@ -23,6 +23,13 @@ extern zend_class_entry *httpparser_class_entry;
 
 static int httpparser_resource_handle;
 
+typedef struct
+{
+	int finished;
+	zval *data;
+	char *tmp;
+} php_httpparser_t;
+
 //void php_httpparser_init(TSRMLS_D);
 
 void static destruct_httpparser(zend_rsrc_list_entry *rsrc TSRMLS_DC)
@@ -46,36 +53,47 @@ int on_headers_complete(http_parser *p)
 
 int on_message_complete(http_parser *p)
 {
+	php_httpparser_t *result = p->data;
+	result->finished = 1;
+
 	return 0;
 }
 
-int on_path_cb(http_parser *p, const char *at, size_t len, char partial)
+int on_url_cb(http_parser *p, const char *at, size_t len)
 {
+	php_httpparser_t *result = p->data;
+	zval *data = result->data;
+	
+	add_assoc_stringl(data, "url", at, len, 1);
 	return 0;
 }
 
-int on_url_cb(http_parser *p, const char *at, size_t len, char partial)
+int header_field_cb(http_parser *p, const char *at, size_t len)
 {
+	php_httpparser_t *result = p->data;
+	result->tmp = estrndup(at, len);
+	
 	return 0;
 }
 
-int header_field_cb(http_parser *p, const char *at, size_t len,char partial)
+int header_value_cb(http_parser *p, const char *at, size_t len)
 {
+	php_httpparser_t *result = p->data;
+	zval *data = result->data;
+	
+	add_assoc_stringl(data, result->tmp, at, len, 1);
+	efree(result->tmp);
+	result->tmp = NULL;
 	return 0;
 }
 
-int on_fragment_cb(http_parser *p, const char *at, size_t len, char partial)
+int on_body_cb(http_parser *p, const char *at, size_t len)
 {
-	return 0;
-}
+	php_httpparser_t *result = p->data;
+	zval *data = result->data;
+	
+	add_assoc_stringl(data, "body", at, len,  1);
 
-int header_value_cb(http_parser *p, const char *at, size_t len, char partial)
-{
-	return 0;
-}
-
-int on_query_cb(http_parser *p, const char *at, size_t len, char partial)
-{
 	return 0;
 }
 // end of callback
@@ -111,14 +129,15 @@ PHP_FUNCTION(http_parser_init)
 
 PHP_FUNCTION(http_parser_execute)
 {
-	zval *z_parser;
+	zval *z_parser,*result;
+	php_httpparser_t rsrt;
 	http_parser *parser;
 	http_parser_settings *settings;
 	char *body;
 	int body_len, r = 0;
 	
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,
-		"rs",&z_parser, &body, &body_len) == FAILURE) {
+		"rsa",&z_parser, &body, &body_len, &result) == FAILURE) {
 		return;
 	}
 
@@ -129,15 +148,23 @@ PHP_FUNCTION(http_parser_execute)
 	settings->on_message_begin = on_message_begin;
 	settings->on_header_field = header_field_cb;
 	settings->on_header_value = header_value_cb;
-//	settings->on_path = on_path_cb;
 	settings->on_url = on_url_cb;
-//	settings->on_fragment = on_fragment_cb;
-//	settings->on_query_string = on_query_cb;
-	settings->on_body = 0;
+	settings->on_body = on_body_cb;
 	settings->on_headers_complete = on_headers_complete;
 	settings->on_message_complete = on_message_complete;
 	
+	rsrt.data = result;
+	parser->data = &rsrt;
+	
 	http_parser_execute(parser, settings, body, body_len);
+	
+	Z_ISREF_P(result);
+	
+	if (rsrt.finished == 1) {
+		RETURN_TRUE;
+	} else {
+		RETURN_FALSE;
+	}
 }
 
 static zend_function_entry httpparser_functions[] = {
