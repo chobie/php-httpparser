@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2011 The PHP Group                                |
+   | Copyright (c) 1997-2012 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -12,7 +12,7 @@
    | obtain it through the world-wide-web, please send a note to          |
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
-   | Authors: Shuhei Tanuma <chobieee@gmail.com>                          |
+   | Authors: Shuhei Tanuma <chobieeee@php.net>                          |
    +----------------------------------------------------------------------+
  */
 
@@ -22,13 +22,6 @@
 extern zend_class_entry *httpparser_class_entry;
 
 static int httpparser_resource_handle;
-
-typedef struct
-{
-	int finished;
-	zval *data;
-	char *tmp;
-} php_httpparser_t;
 
 //void php_httpparser_init(TSRMLS_D);
 
@@ -53,7 +46,7 @@ int on_headers_complete(http_parser *p)
 
 int on_message_complete(http_parser *p)
 {
-	php_httpparser_t *result = p->data;
+	php_http_parser_context *result = p->data;
 	result->finished = 1;
 
 	return 0;
@@ -61,8 +54,41 @@ int on_message_complete(http_parser *p)
 
 int on_url_cb(http_parser *p, const char *at, size_t len)
 {
-	php_httpparser_t *result = p->data;
+	php_http_parser_context *result = p->data;
 	zval *data = result->data;
+	
+	http_parser_parse_url(at, len, false, &result->handle);
+	
+	if (result->handle.field_set & (1<<UF_SCHEMA)) {
+		const char *schema = at+result->handle.field_data[UF_SCHEMA].off;
+		int length = result->handle.field_data[UF_SCHEMA].len;
+		add_assoc_stringl(data, "schema", schema, length, 1);
+	}
+	if (result->handle.field_set & (1<<UF_HOST)) {
+		const char *host = at+result->handle.field_data[UF_HOST].off;
+		int length = result->handle.field_data[UF_HOST].len;
+		add_assoc_stringl(data, "host", host, length, 1);
+	}
+	if (result->handle.field_set & (1<<UF_PORT)) {
+		const char *port = at+result->handle.field_data[UF_PORT].off;
+		int length = result->handle.field_data[UF_PORT].len;
+		add_assoc_stringl(data, "port", port, length, 1);
+	}
+	if (result->handle.field_set & (1<<UF_PATH)) {
+		const char *path = at+result->handle.field_data[UF_PATH].off;
+		int length = result->handle.field_data[UF_PATH].len;
+		add_assoc_stringl(data, "path", path, length, 1);
+	}
+	if (result->handle.field_set & (1<<UF_QUERY)) {
+		const char *query = at+result->handle.field_data[UF_QUERY].off;
+		int length = result->handle.field_data[UF_QUERY].len;
+		add_assoc_stringl(data, "query", query, length, 1);
+	}
+	if (result->handle.field_set & (1<<UF_FRAGMENT)) {
+		const char *fragment = at+result->handle.field_data[UF_FRAGMENT].off;
+		int length = result->handle.field_data[UF_FRAGMENT].len;
+		add_assoc_stringl(data, "fragment", fragment, length, 1);
+	}
 	
 	add_assoc_stringl(data, "url", at, len, 1);
 	return 0;
@@ -70,7 +96,7 @@ int on_url_cb(http_parser *p, const char *at, size_t len)
 
 int header_field_cb(http_parser *p, const char *at, size_t len)
 {
-	php_httpparser_t *result = p->data;
+	php_http_parser_context *result = p->data;
 	result->tmp = estrndup(at, len);
 	
 	return 0;
@@ -78,7 +104,7 @@ int header_field_cb(http_parser *p, const char *at, size_t len)
 
 int header_value_cb(http_parser *p, const char *at, size_t len)
 {
-	php_httpparser_t *result = p->data;
+	php_http_parser_context *result = p->data;
 	zval *data = result->data;
 	
 	add_assoc_stringl(data, result->tmp, at, len, 1);
@@ -89,7 +115,7 @@ int header_value_cb(http_parser *p, const char *at, size_t len)
 
 int on_body_cb(http_parser *p, const char *at, size_t len)
 {
-	php_httpparser_t *result = p->data;
+	php_http_parser_context *result = p->data;
 	zval *data = result->data;
 	
 	add_assoc_stringl(data, "body", at, len,  1);
@@ -119,48 +145,47 @@ ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(http_parser_init)
 {
-	http_parser *parser;
-	parser = emalloc(sizeof(http_parser));
+	php_http_parser_context *ctx;
+	ctx = emalloc(sizeof(php_http_parser_context));
 
-	http_parser_init(parser, HTTP_REQUEST);
+	http_parser_init(&ctx->parser, HTTP_REQUEST);
 	
-	ZEND_REGISTER_RESOURCE(return_value, parser, httpparser_resource_handle);
+	memset(&ctx->handle, 0, sizeof(struct http_parser_url));
+
+		/* setup callback */
+	ctx->settings.on_message_begin = on_message_begin;
+	ctx->settings.on_header_field = header_field_cb;
+	ctx->settings.on_header_value = header_value_cb;
+	ctx->settings.on_url = on_url_cb;
+	ctx->settings.on_body = on_body_cb;
+	ctx->settings.on_headers_complete = on_headers_complete;
+	ctx->settings.on_message_complete = on_message_complete;
+
+	ZEND_REGISTER_RESOURCE(return_value, ctx, httpparser_resource_handle);
 }
 
 PHP_FUNCTION(http_parser_execute)
 {
 	zval *z_parser,*result;
-	php_httpparser_t rsrt;
-	http_parser *parser;
-	http_parser_settings *settings;
+	php_http_parser_context *context;
 	char *body;
-	int body_len, r = 0;
+	int body_len;
 	
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,
 		"rsa",&z_parser, &body, &body_len, &result) == FAILURE) {
 		return;
 	}
 
-	ZEND_FETCH_RESOURCE(parser, http_parser*, &z_parser, -1, PHP_HTTPPARSER_RESOURCE_NAME, httpparser_resource_handle);
+	ZEND_FETCH_RESOURCE(context, php_http_parser_context*, &z_parser, -1, PHP_HTTPPARSER_RESOURCE_NAME, httpparser_resource_handle);
 
-	settings = malloc(sizeof(http_parser_settings));
-
-	settings->on_message_begin = on_message_begin;
-	settings->on_header_field = header_field_cb;
-	settings->on_header_value = header_value_cb;
-	settings->on_url = on_url_cb;
-	settings->on_body = on_body_cb;
-	settings->on_headers_complete = on_headers_complete;
-	settings->on_message_complete = on_message_complete;
+	context->data = result;
+	context->parser.data = context;
 	
-	rsrt.data = result;
-	parser->data = &rsrt;
-	
-	http_parser_execute(parser, settings, body, body_len);
+	http_parser_execute(&context->parser, &context->settings, body, body_len);
 	
 	Z_ISREF_P(result);
 	
-	if (rsrt.finished == 1) {
+	if (context->finished == 1) {
 		RETURN_TRUE;
 	} else {
 		RETURN_FALSE;

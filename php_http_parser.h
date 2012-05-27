@@ -23,6 +23,16 @@ extern zend_module_entry httpparser_module_entry;
 
 extern zend_class_entry *httpparser_class_entry;
 
+typedef struct {
+	struct http_parser parser;
+	struct http_parser_url handle;
+	struct http_parser_settings settings;
+	int was_header_value;
+	int finished;
+	zval *data;
+	char *tmp;
+} php_http_parser_context;
+
 #define PHP_HTTPPARSER_RESOURCE_NAME "httpparser"
 
 #endif /* PHP_HTTPPARSER_H */
