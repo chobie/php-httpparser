@@ -19,11 +19,7 @@
 
 #include "php_http_parser.h"
 
-extern zend_class_entry *httpparser_class_entry;
-
 static int httpparser_resource_handle;
-
-//void php_httpparser_init(TSRMLS_D);
 
 void static destruct_httpparser(zend_rsrc_list_entry *rsrc TSRMLS_DC)
 {
@@ -32,8 +28,7 @@ void static destruct_httpparser(zend_rsrc_list_entry *rsrc TSRMLS_DC)
 	efree(obj);
 }
 
-// ry's http parser callbacks
-
+/*  http parser callbacks */
 int on_message_begin(http_parser *p)
 {
 	return 0;
@@ -81,6 +76,7 @@ int on_url_cb(http_parser *p, const char *at, size_t len)
 int header_field_cb(http_parser *p, const char *at, size_t len)
 {
 	php_http_parser_context *result = p->data;
+	/* TODO: */
 	result->tmp = estrndup(at, len);
 	
 	return 0;
@@ -92,6 +88,7 @@ int header_value_cb(http_parser *p, const char *at, size_t len)
 	zval *data = result->headers;
 	
 	add_assoc_stringl(data, result->tmp, at, len, 1);
+	/* TODO: */
 	efree(result->tmp);
 	result->tmp = NULL;
 	return 0;
@@ -106,11 +103,10 @@ int on_body_cb(http_parser *p, const char *at, size_t len)
 
 	return 0;
 }
-// end of callback
+/* end of callback */
 
 
 PHP_MINIT_FUNCTION(httpparser) {
-	//php_httpparser_init(TSRMLS_C);
 	httpparser_resource_handle = zend_register_list_destructors_ex(destruct_httpparser, NULL, PHP_HTTPPARSER_RESOURCE_NAME, module_number);
 
 	return SUCCESS;
@@ -124,8 +120,6 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_http_parser_execute, 0, 0, 3)
 	ZEND_ARG_INFO(0, buffer)
 	ZEND_ARG_INFO(0, setting)
 ZEND_END_ARG_INFO()
-
-
 
 PHP_FUNCTION(http_parser_init)
 {
@@ -183,7 +177,7 @@ PHP_FUNCTION(http_parser_execute)
 }
 
 static zend_function_entry httpparser_functions[] = {
-	PHP_FE(http_parser_init, arginfo_http_parser_init)
+	PHP_FE(http_parser_init,    arginfo_http_parser_init)
 	PHP_FE(http_parser_execute, arginfo_http_parser_init)
 	{NULL, NULL, NULL}
 };

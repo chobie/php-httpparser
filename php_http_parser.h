@@ -21,8 +21,6 @@
 extern zend_module_entry httpparser_module_entry;
 #define phpext_httpparser_ptr &httpparser_module_entry;
 
-extern zend_class_entry *httpparser_class_entry;
-
 typedef struct {
 	struct http_parser parser;
 	struct http_parser_url handle;
