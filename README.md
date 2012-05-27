@@ -59,8 +59,9 @@ if(http_parser_execute($parser,$request,$result)) {
 
 ## API
 
-### resource http_parser_init()
+### resource http_parser_init(int $target = HTTP_REQUEST)
 
+$target should be HTTP_REQUEST or HTTP_RESPONSE.
 
 ### bool http_parser_execute(resource $resource, string $request, array &$result)
 
