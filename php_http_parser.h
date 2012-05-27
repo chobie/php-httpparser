@@ -25,6 +25,7 @@ typedef struct {
 	struct http_parser parser;
 	struct http_parser_url handle;
 	struct http_parser_settings settings;
+	int is_response;
 	int was_header_value;
 	int finished;
 	zval *data;

@@ -51,7 +51,7 @@ int on_message_complete(http_parser *p)
 	if (result->handle.field_set & (1 << flag)) { \
 		const char *name = at+result->handle.field_data[flag].off; \
 		int length = result->handle.field_data[flag].len; \
-		add_assoc_stringl(data, #name, name, length, 1); \
+		add_assoc_stringl(data, #name, (char*)name, length, 1); \
 	} 
 
 int on_url_cb(http_parser *p, const char *at, size_t len)
@@ -61,7 +61,7 @@ int on_url_cb(http_parser *p, const char *at, size_t len)
 	
 	http_parser_parse_url(at, len, 0, &result->handle);
 	
-	add_assoc_stringl(data, "QUERY_STRING", at, len, 1);
+	add_assoc_stringl(data, "QUERY_STRING", (char*)at, len, 1);
 
 	PHP_HTTP_PARSER_PARSE_URL(UF_SCHEMA, scheme);
 	PHP_HTTP_PARSER_PARSE_URL(UF_HOST, host);
@@ -87,7 +87,7 @@ int header_value_cb(http_parser *p, const char *at, size_t len)
 	php_http_parser_context *result = p->data;
 	zval *data = result->headers;
 	
-	add_assoc_stringl(data, result->tmp, at, len, 1);
+	add_assoc_stringl(data, result->tmp, (char*)at, len, 1);
 	/* TODO: */
 	efree(result->tmp);
 	result->tmp = NULL;
@@ -99,7 +99,7 @@ int on_body_cb(http_parser *p, const char *at, size_t len)
 	php_http_parser_context *result = p->data;
 	zval *data = result->headers;
 	
-	add_assoc_stringl(data, "body", at, len,  1);
+	add_assoc_stringl(data, "body", (char*)at, len,  1);
 
 	return 0;
 }
@@ -109,10 +109,15 @@ int on_body_cb(http_parser *p, const char *at, size_t len)
 PHP_MINIT_FUNCTION(httpparser) {
 	httpparser_resource_handle = zend_register_list_destructors_ex(destruct_httpparser, NULL, PHP_HTTPPARSER_RESOURCE_NAME, module_number);
 
+	zend_register_long_constant("HTTP_BOTH", sizeof("HTTP_BOTH"), HTTP_BOTH, CONST_PERSISTENT, module_number TSRMLS_CC);
+	zend_register_long_constant("HTTP_REQUEST", sizeof("HTTP_REQUEST"), HTTP_REQUEST, CONST_PERSISTENT, module_number TSRMLS_CC);
+	zend_register_long_constant("HTTP_RESPONSE", sizeof("HTTP_RESPONSE"), HTTP_RESPONSE, CONST_PERSISTENT, module_number TSRMLS_CC);
+
 	return SUCCESS;
 }
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_http_parser_init, 0, 0, 0)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_http_parser_init, 0, 0, 1)
+	ZEND_ARG_INFO(0, target)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_http_parser_execute, 0, 0, 3)
@@ -123,10 +128,22 @@ ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(http_parser_init)
 {
+	long target = HTTP_REQUEST;
 	php_http_parser_context *ctx;
-	ctx = emalloc(sizeof(php_http_parser_context));
 
-	http_parser_init(&ctx->parser, HTTP_REQUEST);
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,
+		"|l",&target) == FAILURE) {
+		return;
+	}
+
+	ctx = emalloc(sizeof(php_http_parser_context));
+	http_parser_init(&ctx->parser, target);
+	
+	if (target == HTTP_RESPONSE) {
+		ctx->is_response = 1;
+	} else {
+		ctx->is_response = 0;
+	}
 	
 	memset(&ctx->handle, 0, sizeof(struct http_parser_url));
 
@@ -166,6 +183,12 @@ PHP_FUNCTION(http_parser_execute)
 	context->parser.data = context;
 	
 	http_parser_execute(&context->parser, &context->settings, body, body_len);
+	
+	if (context->is_response == 0) {
+		add_assoc_string(result, "REQUEST_METHOD", (char*)http_method_str(context->parser.method), 1);
+	} else {
+		add_assoc_long(result, "status_code", (long)context->parser.status_code);
+	}
 
 	if (context->finished == 1) {
 		RETURN_TRUE;
