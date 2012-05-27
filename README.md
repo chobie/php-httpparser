@@ -1,5 +1,8 @@
 # Joyent's http parser binding for php
 
+[![Build Status](https://secure.travis-ci.org/chobie/php-httpparser.png)](http://travis-ci.org/chobie/php-httpparser)
+
+
 ````
 <?php
 $parser = http_parser_init();
