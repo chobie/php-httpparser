@@ -1,0 +1,13 @@
+language: php
+php:
+  - 5.2
+  - 5.3
+  - 5.4
+
+before_install:
+  - git submodule update --init --recursive
+  - phpize && ./configure
+  - make
+
+script:
+  - NO_INTERACTION=1 make test
