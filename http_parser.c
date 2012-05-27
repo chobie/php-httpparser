@@ -151,7 +151,7 @@ PHP_FUNCTION(http_parser_execute)
 	int body_len;
 	
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,
-		"rsa",&z_parser, &body, &body_len, &result) == FAILURE) {
+		"rs/a",&z_parser, &body, &body_len, &result) == FAILURE) {
 		return;
 	}
 
@@ -167,8 +167,6 @@ PHP_FUNCTION(http_parser_execute)
 	
 	http_parser_execute(&context->parser, &context->settings, body, body_len);
 
-	Z_ISREF_P(result);
-	
 	if (context->finished == 1) {
 		RETURN_TRUE;
 	} else {
