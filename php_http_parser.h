@@ -30,6 +30,7 @@ typedef struct {
 	int was_header_value;
 	int finished;
 	zval *data;
+	zval *headers;
 	char *tmp;
 } php_http_parser_context;
 

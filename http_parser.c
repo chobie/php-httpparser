@@ -52,6 +52,13 @@ int on_message_complete(http_parser *p)
 	return 0;
 }
 
+#define PHP_HTTP_PARSER_PARSE_URL(flag, name) \
+	if (result->handle.field_set & (1 << flag)) { \
+		const char *name = at+result->handle.field_data[flag].off; \
+		int length = result->handle.field_data[flag].len; \
+		add_assoc_stringl(data, #name, name, length, 1); \
+	} 
+
 int on_url_cb(http_parser *p, const char *at, size_t len)
 {
 	php_http_parser_context *result = p->data;
@@ -59,38 +66,15 @@ int on_url_cb(http_parser *p, const char *at, size_t len)
 	
 	http_parser_parse_url(at, len, false, &result->handle);
 	
-	if (result->handle.field_set & (1<<UF_SCHEMA)) {
-		const char *schema = at+result->handle.field_data[UF_SCHEMA].off;
-		int length = result->handle.field_data[UF_SCHEMA].len;
-		add_assoc_stringl(data, "schema", schema, length, 1);
-	}
-	if (result->handle.field_set & (1<<UF_HOST)) {
-		const char *host = at+result->handle.field_data[UF_HOST].off;
-		int length = result->handle.field_data[UF_HOST].len;
-		add_assoc_stringl(data, "host", host, length, 1);
-	}
-	if (result->handle.field_set & (1<<UF_PORT)) {
-		const char *port = at+result->handle.field_data[UF_PORT].off;
-		int length = result->handle.field_data[UF_PORT].len;
-		add_assoc_stringl(data, "port", port, length, 1);
-	}
-	if (result->handle.field_set & (1<<UF_PATH)) {
-		const char *path = at+result->handle.field_data[UF_PATH].off;
-		int length = result->handle.field_data[UF_PATH].len;
-		add_assoc_stringl(data, "path", path, length, 1);
-	}
-	if (result->handle.field_set & (1<<UF_QUERY)) {
-		const char *query = at+result->handle.field_data[UF_QUERY].off;
-		int length = result->handle.field_data[UF_QUERY].len;
-		add_assoc_stringl(data, "query", query, length, 1);
-	}
-	if (result->handle.field_set & (1<<UF_FRAGMENT)) {
-		const char *fragment = at+result->handle.field_data[UF_FRAGMENT].off;
-		int length = result->handle.field_data[UF_FRAGMENT].len;
-		add_assoc_stringl(data, "fragment", fragment, length, 1);
-	}
+	add_assoc_stringl(data, "QUERY_STRING", at, len, 1);
+
+	PHP_HTTP_PARSER_PARSE_URL(UF_SCHEMA, scheme);
+	PHP_HTTP_PARSER_PARSE_URL(UF_HOST, host);
+	PHP_HTTP_PARSER_PARSE_URL(UF_PORT, port);
+	PHP_HTTP_PARSER_PARSE_URL(UF_PATH, path);
+	PHP_HTTP_PARSER_PARSE_URL(UF_QUERY, query);
+	PHP_HTTP_PARSER_PARSE_URL(UF_FRAGMENT, fragment);
 	
-	add_assoc_stringl(data, "url", at, len, 1);
 	return 0;
 }
 
@@ -105,7 +89,7 @@ int header_field_cb(http_parser *p, const char *at, size_t len)
 int header_value_cb(http_parser *p, const char *at, size_t len)
 {
 	php_http_parser_context *result = p->data;
-	zval *data = result->data;
+	zval *data = result->headers;
 	
 	add_assoc_stringl(data, result->tmp, at, len, 1);
 	efree(result->tmp);
@@ -116,7 +100,7 @@ int header_value_cb(http_parser *p, const char *at, size_t len)
 int on_body_cb(http_parser *p, const char *at, size_t len)
 {
 	php_http_parser_context *result = p->data;
-	zval *data = result->data;
+	zval *data = result->headers;
 	
 	add_assoc_stringl(data, "body", at, len,  1);
 
@@ -152,7 +136,7 @@ PHP_FUNCTION(http_parser_init)
 	
 	memset(&ctx->handle, 0, sizeof(struct http_parser_url));
 
-		/* setup callback */
+	/* setup callback */
 	ctx->settings.on_message_begin = on_message_begin;
 	ctx->settings.on_header_field = header_field_cb;
 	ctx->settings.on_header_value = header_value_cb;
@@ -160,13 +144,14 @@ PHP_FUNCTION(http_parser_init)
 	ctx->settings.on_body = on_body_cb;
 	ctx->settings.on_headers_complete = on_headers_complete;
 	ctx->settings.on_message_complete = on_message_complete;
+	
 
 	ZEND_REGISTER_RESOURCE(return_value, ctx, httpparser_resource_handle);
 }
 
 PHP_FUNCTION(http_parser_execute)
 {
-	zval *z_parser,*result;
+	zval *z_parser,*result, *headers;
 	php_http_parser_context *context;
 	char *body;
 	int body_len;
@@ -178,11 +163,16 @@ PHP_FUNCTION(http_parser_execute)
 
 	ZEND_FETCH_RESOURCE(context, php_http_parser_context*, &z_parser, -1, PHP_HTTPPARSER_RESOURCE_NAME, httpparser_resource_handle);
 
+	MAKE_STD_ZVAL(headers);
+	array_init(headers);
+	add_assoc_zval(result, "headers", headers);
+
+	context->headers = headers;
 	context->data = result;
 	context->parser.data = context;
 	
 	http_parser_execute(&context->parser, &context->settings, body, body_len);
-	
+
 	Z_ISREF_P(result);
 	
 	if (context->finished == 1) {
