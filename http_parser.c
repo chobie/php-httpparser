@@ -59,7 +59,7 @@ int on_url_cb(http_parser *p, const char *at, size_t len)
 	php_http_parser_context *result = p->data;
 	zval *data = result->data;
 	
-	http_parser_parse_url(at, len, false, &result->handle);
+	http_parser_parse_url(at, len, 0, &result->handle);
 	
 	add_assoc_stringl(data, "QUERY_STRING", at, len, 1);
 
